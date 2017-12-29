@@ -19,6 +19,7 @@ type PeerProfile interface {
 }
 
 // Peer间的共享数据
+// 这个类别实现了PeerProfile接口
 type PeerProfileImplement struct {
 	// 基本信息
 	name    string

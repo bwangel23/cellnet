@@ -17,6 +17,7 @@ type Connector interface {
 	SetAutoReconnectSec(sec int)
 }
 
+// 这个类型实现了 Peer 接口的所有方法
 type socketConnector struct {
 	*socketPeer
 
