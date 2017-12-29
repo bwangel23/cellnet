@@ -18,9 +18,14 @@ type Session interface {
 	// 归属端
 	FromPeer() Peer
 
+	// 将一个用户数据保存在session
 	SetTag(tag interface{})
 
+	// 取出与session关联的用户数据
 	Tag() interface{}
+
+	// 取原始连接net.Conn
+	RawConn() interface{}
 }
 
 // 端, Connector或Acceptor

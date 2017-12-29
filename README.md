@@ -187,9 +187,9 @@ proto               cellnet内部的proto
 
     binary          内部系统消息,rpc消息
 
-    pb              protobuf消息
+    pb              protobuf消息(內部測試用)
 
-    sproto          sproto的消息
+    sproto          sproto的消息(內部測試用)
 
 protoc-gen-msg      protobuf的protoc插件, 消息id生成, 使用pb编码时使用
 
@@ -368,7 +368,7 @@ cellnet.RegisterMessage(peer, "coredef.SessionConnectFailed", func(ev *cellnet.E
 ## 获得Session
 Session可以通过以下途径获得:
 
-- 通过cellnet.RegisterMessagez注册回调后, 通过回调参数*cellnet.Event中的Ses获得
+- 通过cellnet.RegisterMessage注册回调后, 通过回调参数*cellnet.Event中的Ses获得
 
 - 如果Peer是Connector, 可以通过如下代码获得连接器上默认连接
 
@@ -569,17 +569,22 @@ Event是消息处理的上下文, 不建议缓存Event
 
 # 贡献者
 
-viwii(viwii@sina.cn), 提供一个可能造成死锁的bug
+按贡献时间排序，越靠前表示越新的贡献
 
-IronsDu(https://github.com/IronsDu), 大幅度性能优化
+superikw(https://github.com/superikw), 测试出一个websocket接口并发发送问题
 
-Chris Lonng(https://github.com/lonnng), 提供一个最大封包约束造成服务器间连接断开的bug
-
-chuan.li(https://github.com/blade-226), 提供一个没有在io线程编码的bug
+bruce.hu(https://github.com/hxdhero), 测试出一个竞态冲突的bug
 
 M4tou(https://github.com/mutousay), 协助解决RPC异步超时回调处理
 
-bruce.hu(https://github.com/hxdhero), 测试出一个竞态冲突的bug
+chuan.li(https://github.com/blade-226), 提供一个没有在io线程编码的bug
+
+Chris Lonng(https://github.com/lonnng), 提供一个最大封包约束造成服务器间连接断开的bug
+
+IronsDu(https://github.com/IronsDu), 大幅度性能优化
+
+viwii(viwii@sina.cn), 提供一个可能造成死锁的bug
+
 
 # 备注
 
