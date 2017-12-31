@@ -24,16 +24,14 @@ func main() {
 		log.Debugln("client accepted")
 	})
 
-	cellnet.RegisterMessage(p, "gamedef.TestEchoJsonACK", func(ev *cellnet.Event) {
-
-		msg := ev.Msg.(*jsongamedef.TestEchoJsonACK)
-
-		log.Debugln(msg.Content)
-
-		ev.Send(&jsongamedef.TestEchoJsonACK{Content: "roger"})
-
+	cellnet.RegisterMessage(p, "coredef.SessionClosed", func(ev *cellnet.Event) {
 		ev.Ses.Close()
+		log.Debugln("client closed")
+	})
 
+	cellnet.RegisterMessage(p, "gamedef.TestEchoJsonACK", func(ev *cellnet.Event) {
+		msg := ev.Msg.(*jsongamedef.TestEchoJsonACK)
+		ev.Send(&jsongamedef.TestEchoJsonACK{Content: msg.Content})
 	})
 
 	queue.StartLoop()
