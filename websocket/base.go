@@ -5,6 +5,7 @@ import (
 )
 
 // Peer间的共享数据
+//  如果结构体没有命名的话，默认名字为结构体的名字
 type wsPeer struct {
 	cellnet.EventQueue
 

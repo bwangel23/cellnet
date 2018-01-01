@@ -44,6 +44,7 @@ func (self *evQueue) Post(callback func()) {
 	self.queue <- callback
 }
 
+// 这个函数做的操作就是如果 callback 抛出异常了，那么整个程序并不会退出，而是将异常栈打印出来
 func (self *evQueue) protectedCall(callback func()) {
 
 	if callback == nil {
@@ -64,6 +65,7 @@ func (self *evQueue) protectedCall(callback func()) {
 	callback()
 }
 
+// 这个函数做的操作就是创建一个 goroutine，来充当队列的 worker
 func (self *evQueue) StartLoop() {
 
 	self.endSignal.Add(1)
