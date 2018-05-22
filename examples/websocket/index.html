@@ -3,50 +3,30 @@
 <head>
 </head>
 <body>
+<p>在Chrome浏览器中按F12打开调试窗口，Console中查看结果</p>
+<script type="text/javascript">
+    
+    window.onload = function () {
 
-    <div id="app">
-        <input type="text" @keyup.enter="send_message" v-model="input_message" placeholder="add some text">
-        <ul>
-            <li v-for="message in received_messages">
-                {{ message }}
-            </li>
-        </ul>
-    </div>
+        console.log("hello")
 
-    <script src="https://cdn.jsdelivr.net/npm/vue"></script>
-    <script type="text/javascript">
-        var app = new Vue({
-            el: '#app',
-            data: {
-                input_message: "",
-                received_messages: [],
-                ws: null
-            },
-            mounted: function () {
-                var self = this;
-                self.ws = new WebSocket("ws://127.0.0.1:8801/echo");
+        var ws = new WebSocket("ws://127.0.0.1:18802/echo");
 
-                self.ws.onmessage = function (evt) {
-                    console.log("Received Message: ", evt.data);
-                    self.received_messages.push(evt.data);
-                };
+        ws.onopen = function(evt) {
+            console.log("Connection open ...");
+            ws.send('main.TestEchoACK\n{"Msg":"hello world" }');
+        };
 
-                self.ws.onclose = function (evt) {
-                    console.log("Connection closed.");
-                };
-            },
-            methods: {
-                send_message: function (event) {
-                    if(this.input_message == "exit") {
-                        this.ws.close();
-                        this.received_messages.push("Connection colsed");
-                        return;
-                    }
-                    this.ws.send('gamedef.TestEchoJsonACK\n{"Content":"' + this.input_message + '" }');
-                    this.input_message = "";
-                }
-            }
-        });
-    </script>
+        ws.onmessage = function(evt) {
+            console.log( "Received Message: " + evt.data);
+            //ws.close();
+        };
+
+        ws.onclose = function(evt) {
+            console.log("Connection closed.");
+        };
+    }
+
+</script>
 </body>
 </html>

@@ -1,99 +1,114 @@
 package tests
 
 import (
-	"testing"
-
+	"fmt"
 	"github.com/davyxu/cellnet"
-	_ "github.com/davyxu/cellnet/codec/pb" // 启用pb编码
-	"github.com/davyxu/cellnet/proto/pb/gamedef"
-	"github.com/davyxu/cellnet/socket"
+	"github.com/davyxu/cellnet/peer"
+	"github.com/davyxu/cellnet/proc"
 	"github.com/davyxu/cellnet/util"
 	"sync"
+	"testing"
 	"time"
 )
 
-var singalConnector *util.SignalTester
+const recreateConn_Address = "127.0.0.1:7201"
 
-func runEchoServer() {
+var recreateConn_Signal *util.SignalTester
+
+func recreateConn_StartServer() {
 	queue := cellnet.NewEventQueue()
 
-	p := socket.NewAcceptor(queue).Start("127.0.0.1:7201")
-	p.SetName("server")
+	p := peer.NewGenericPeer("tcp.Acceptor", "server", recreateConn_Address, queue)
 
-	cellnet.RegisterMessage(p, "gamedef.TestEchoACK", func(ev *cellnet.Event) {
-		msg := ev.Msg.(*gamedef.TestEchoACK)
+	proc.BindProcessorHandler(p, "tcp.ltv", func(ev cellnet.Event) {
 
-		// 发包后关闭
-		ev.Send(&gamedef.TestEchoACK{
-			Content: msg.Content,
-		})
+		switch msg := ev.Message().(type) {
+		case *TestEchoACK:
 
+			fmt.Printf("server recv %+v\n", msg)
+
+			ev.Session().Send(&TestEchoACK{
+				Msg:   msg.Msg,
+				Value: msg.Value,
+			})
+		}
 	})
 
-	queue.StartLoop()
+	p.Start()
 
+	queue.StartLoop()
 }
 
 // 客户端连接上后, 主动断开连接, 确保连接正常关闭
 func runConnClose() {
-
 	queue := cellnet.NewEventQueue()
-
-	p := socket.NewConnector(queue).Start("127.0.0.1:7201")
-	p.SetName("client.ConnClose")
 
 	var times int
 
-	cellnet.RegisterMessage(p, "coredef.SessionConnected", func(ev *cellnet.Event) {
+	p := peer.NewGenericPeer("tcp.Connector", "client.ConnClose", recreateConn_Address, queue)
 
-		p.Stop()
+	proc.BindProcessorHandler(p, "tcp.ltv", func(ev cellnet.Event) {
 
-		time.Sleep(time.Millisecond * 500)
+		switch ev.Message().(type) {
+		case *cellnet.SessionConnected:
+			p.Stop()
 
-		if times < 3 {
-			p.Start(p.Address())
-			times++
-		} else {
-			singalConnector.Done(1)
+			time.Sleep(time.Millisecond * 100)
+
+			if times < 3 {
+				p.Start()
+				times++
+			} else {
+				recreateConn_Signal.Done(1)
+			}
 		}
-
 	})
+
+	p.Start()
 
 	queue.StartLoop()
 
-	singalConnector.WaitAndExpect("not expect times", 1)
+	recreateConn_Signal.WaitAndExpect("not expect times", 1)
 
 	p.Stop()
 }
 
 func TestCreateDestroyConnector(t *testing.T) {
 
-	singalConnector = util.NewSignalTester(t)
-	singalConnector.SetTimeout(time.Second * 3)
+	recreateConn_Signal = util.NewSignalTester(t)
 
-	runEchoServer()
+	recreateConn_StartServer()
 
 	runConnClose()
 }
 
-const clientConnectionCount = 3
+const recreateAcc_clientConnection = 3
+
+const recreateAcc_Address = "127.0.0.1:7711"
 
 func TestCreateDestroyAcceptor(t *testing.T) {
 	queue := cellnet.NewEventQueue()
 
-	p := socket.NewAcceptor(queue).Start("127.0.0.1:7701")
-	p.SetName("server")
-
 	var allAccepted sync.WaitGroup
-	cellnet.RegisterMessage(p, "coredef.SessionAccepted", func(ev *cellnet.Event) {
 
-		allAccepted.Done()
+	p := peer.NewGenericPeer("tcp.Acceptor", "server", recreateAcc_Address, queue)
+
+	proc.BindProcessorHandler(p, "tcp.ltv", func(ev cellnet.Event) {
+
+		switch ev.Message().(type) {
+		case *cellnet.SessionAccepted:
+
+			allAccepted.Done()
+
+		}
 	})
+
+	p.Start()
 
 	queue.StartLoop()
 
 	log.Debugln("Start connecting...")
-	allAccepted.Add(clientConnectionCount)
+	allAccepted.Add(recreateAcc_clientConnection)
 	runMultiConnection()
 
 	log.Debugln("Wait all accept...")
@@ -105,11 +120,11 @@ func TestCreateDestroyAcceptor(t *testing.T) {
 	// 确认所有连接已经断开
 	time.Sleep(time.Second)
 
-	log.Debugln("Session count:", p.SessionCount())
+	log.Debugln("Session count:", p.(cellnet.SessionAccessor).SessionCount())
 
-	p.Start(p.Address())
+	p.Start()
 	log.Debugln("Start connecting...")
-	allAccepted.Add(clientConnectionCount)
+	allAccepted.Add(recreateAcc_clientConnection)
 	runMultiConnection()
 
 	log.Debugln("Wait all accept...")
@@ -120,10 +135,16 @@ func TestCreateDestroyAcceptor(t *testing.T) {
 
 func runMultiConnection() {
 
-	for i := 0; i < clientConnectionCount; i++ {
+	for i := 0; i < recreateAcc_clientConnection; i++ {
 
-		p := socket.NewConnector(nil).Start("127.0.0.1:7701")
-		p.SetName("client.MultiConn")
+		p := peer.NewGenericPeer("tcp.Connector", "client.ConnClose", recreateAcc_Address, nil)
+
+		proc.BindProcessorHandler(p, "tcp.ltv", func(ev cellnet.Event) {
+
+		})
+
+		p.Start()
+
 	}
 
 }

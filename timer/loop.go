@@ -38,10 +38,12 @@ func (self *Loop) rawPost() {
 		panic("seconds can be zero in loop")
 	}
 
-	After(self.Queue, self.Duration, func() {
+	if self.running {
+		After(self.Queue, self.Duration, func() {
 
-		tick(self, false)
-	})
+			tick(self, false)
+		}, nil)
+	}
 }
 
 func (self *Loop) NextLoop() {
@@ -56,8 +58,9 @@ func (self *Loop) Stop() {
 	self.running = false
 }
 
-func (self *Loop) Notify() {
+func (self *Loop) Notify() *Loop {
 	self.userCallback(self)
+	return self
 }
 
 func tick(ctx interface{}, nextLoop bool) {

@@ -22,15 +22,19 @@ package {{.PackageName}}
 import (
 	"github.com/davyxu/cellnet"
 	"reflect"
-	_ "github.com/davyxu/cellnet/codec/pb"
+	_ "github.com/davyxu/cellnet/codec/gogopb"
+	"github.com/davyxu/cellnet/codec"
 )
 {{end}}
 
 func init() {
 	{{range .Protos}}
 	// {{.Name}}{{range .Messages}}
-	cellnet.RegisterMessageMeta("pb","{{.FullName}}", reflect.TypeOf((*{{.Name}})(nil)).Elem(), {{.MsgID}})	{{end}}
-	{{end}}
+	cellnet.RegisterMessageMeta(&cellnet.MessageMeta{
+		Codec: codec.MustGetCodec("gogopb"),
+		Type:  reflect.TypeOf((*{{.Name}})(nil)).Elem(),
+		ID: {{.MsgID}},
+	}){{end}} {{end}}
 }
 
 `

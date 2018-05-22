@@ -1,109 +1,124 @@
 package tests
 
 import (
-	"testing"
-
+	"fmt"
 	"github.com/davyxu/cellnet"
-	_ "github.com/davyxu/cellnet/codec/pb"                     // 启用pb编码
-	"github.com/davyxu/cellnet/proto/binary/coredef"           // 底层系统事件
-	jsongamedef "github.com/davyxu/cellnet/proto/json/gamedef" // json逻辑协议
-	"github.com/davyxu/cellnet/proto/pb/gamedef"               // pb逻辑协议
-	"github.com/davyxu/cellnet/socket"
+	"github.com/davyxu/cellnet/peer"
+	_ "github.com/davyxu/cellnet/peer/tcp"
+	_ "github.com/davyxu/cellnet/peer/udp"
+	"github.com/davyxu/cellnet/proc"
+	_ "github.com/davyxu/cellnet/proc/tcp"
+	_ "github.com/davyxu/cellnet/proc/udp"
 	"github.com/davyxu/cellnet/util"
+	"testing"
+	"time"
 )
 
-var echoSignal *util.SignalTester
+type echoContext struct {
+	Address   string
+	Protocol  string
+	Processor string
+	Tester    *util.SignalTester
+	Acceptor  cellnet.GenericPeer
+}
 
-var echoAcceptor cellnet.Peer
+var (
+	echoContexts = []*echoContext{
+		{
+			Address:   "127.0.0.1:7701",
+			Protocol:  "tcp",
+			Processor: "tcp.ltv",
+		},
+		{
+			Address:   "127.0.0.1:7702",
+			Protocol:  "udp",
+			Processor: "udp.ltv",
+		},
+	}
+)
 
-func echoServer() {
-
+func echo_StartServer(context *echoContext) {
 	queue := cellnet.NewEventQueue()
 
-	echoAcceptor = socket.NewAcceptor(queue).Start("127.0.0.1:7701")
-	echoAcceptor.SetName("server")
+	context.Acceptor = peer.NewGenericPeer(context.Protocol+".Acceptor", "server", context.Address, queue)
 
-	// 混合协议支持, 接收pb编码的消息
-	cellnet.RegisterMessage(echoAcceptor, "gamedef.TestEchoACK", func(ev *cellnet.Event) {
-		msg := ev.Msg.(*gamedef.TestEchoACK)
+	proc.BindProcessorHandler(context.Acceptor, context.Processor, func(ev cellnet.Event) {
 
-		log.Debugln("server recv:", msg.Content)
+		switch msg := ev.Message().(type) {
+		case *cellnet.SessionAccepted:
+			fmt.Println("server accepted")
+		case *TestEchoACK:
 
-		ev.Send(&gamedef.TestEchoACK{
-			Content: msg.String(),
-		})
+			fmt.Printf("server recv %+v\n", msg)
 
-	})
+			ev.Session().Send(&TestEchoACK{
+				Msg:   msg.Msg,
+				Value: msg.Value,
+			})
 
-	// 混合协议支持, 接收json编码的消息
-	cellnet.RegisterMessage(echoAcceptor, "gamedef.TestEchoJsonACK", func(ev *cellnet.Event) {
-		msg := ev.Msg.(*jsongamedef.TestEchoJsonACK)
-
-		log.Debugln("server recv json:", msg.Content)
-
-		ev.Send(&gamedef.TestEchoACK{
-			Content: msg.String(),
-		})
+		case *cellnet.SessionClosed:
+			fmt.Println("session closed: ", ev.Session().ID())
+		}
 
 	})
+
+	context.Acceptor.Start()
+
+	queue.StartLoop()
+}
+
+func echo_StartClient(echoContext *echoContext) {
+	queue := cellnet.NewEventQueue()
+
+	p := peer.NewGenericPeer(echoContext.Protocol+".Connector", "client", echoContext.Address, queue)
+
+	proc.BindProcessorHandler(p, echoContext.Processor, func(ev cellnet.Event) {
+
+		switch msg := ev.Message().(type) {
+		case *cellnet.SessionConnected:
+			fmt.Println("client connected")
+			ev.Session().Send(&TestEchoACK{
+				Msg:   "hello",
+				Value: 1234,
+			})
+		case *TestEchoACK:
+
+			fmt.Printf("client recv %+v\n", msg)
+
+			echoContext.Tester.Done(1)
+
+		case *cellnet.SessionClosed:
+			fmt.Println("client closed")
+		}
+	})
+
+	p.Start()
 
 	queue.StartLoop()
 
+	echoContext.Tester.WaitAndExpect("not recv data", 1)
 }
 
-func echoClient() {
+func runEcho(t *testing.T, index int) {
 
-	queue := cellnet.NewEventQueue()
+	ctx := echoContexts[index]
 
-	p := socket.NewConnector(queue).Start("127.0.0.1:7701")
-	p.SetName("client")
+	ctx.Tester = util.NewSignalTester(t)
+	ctx.Tester.SetTimeout(time.Hour)
 
-	cellnet.RegisterMessage(p, "gamedef.TestEchoACK", func(ev *cellnet.Event) {
-		msg := ev.Msg.(*gamedef.TestEchoACK)
+	echo_StartServer(ctx)
 
-		log.Debugln("client recv:", msg.Content)
+	echo_StartClient(ctx)
 
-		echoSignal.Done(1)
-	})
-
-	cellnet.RegisterMessage(p, "coredef.SessionConnected", func(ev *cellnet.Event) {
-
-		log.Debugln("client connected")
-
-		// 发送消息, 底层自动选择pb编码
-		ev.Send(&gamedef.TestEchoACK{
-			Content: "hello",
-		})
-
-		// 发送消息, 底层自动选择json编码
-		ev.Send(&jsongamedef.TestEchoJsonACK{
-			Content: "hello json",
-		})
-
-	})
-
-	cellnet.RegisterMessage(p, "coredef.SessionConnectFailed", func(ev *cellnet.Event) {
-
-		msg := ev.Msg.(*coredef.SessionConnectFailed)
-
-		log.Debugln(msg.Result)
-
-	})
-
-	queue.StartLoop()
-
-	echoSignal.WaitAndExpect("not recv data", 1)
-
+	ctx.Acceptor.Stop()
 }
 
-func TestEcho(t *testing.T) {
+func TestEchoTCP(t *testing.T) {
 
-	echoSignal = util.NewSignalTester(t)
+	runEcho(t, 0)
+}
 
-	echoServer()
+func TestEchoUDP(t *testing.T) {
 
-	echoClient()
-
-	echoAcceptor.Stop()
-
+	runEcho(t, 1)
 }

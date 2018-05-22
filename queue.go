@@ -5,13 +5,17 @@ import (
 	"sync"
 )
 
+// 事件队列
 type EventQueue interface {
-	StartLoop()
 
-	StopLoop(result int)
+	// 事件队列开始工作
+	StartLoop() EventQueue
+
+	// 停止事件队列
+	StopLoop() EventQueue
 
 	// 等待退出
-	Wait() int
+	Wait()
 
 	// 投递事件, 通过队列到达消费者端
 	Post(callback func())
@@ -20,22 +24,21 @@ type EventQueue interface {
 	EnableCapturePanic(v bool)
 }
 
-type evQueue struct {
+type eventQueue struct {
 	queue chan func()
 
 	endSignal sync.WaitGroup
 
 	capturePanic bool
-
-	result int
 }
 
-func (self *evQueue) EnableCapturePanic(v bool) {
+// 启动崩溃捕获
+func (self *eventQueue) EnableCapturePanic(v bool) {
 	self.capturePanic = v
 }
 
-// 派发到队列
-func (self *evQueue) Post(callback func()) {
+// 派发事件处理回调到队列中
+func (self *eventQueue) Post(callback func()) {
 
 	if callback == nil {
 		return
@@ -44,12 +47,9 @@ func (self *evQueue) Post(callback func()) {
 	self.queue <- callback
 }
 
+// 保护调用用户函数
 // 这个函数做的操作就是如果 callback 抛出异常了，那么整个程序并不会退出，而是将异常栈打印出来
-func (self *evQueue) protectedCall(callback func()) {
-
-	if callback == nil {
-		return
-	}
+func (self *eventQueue) protectedCall(callback func()) {
 
 	if self.capturePanic {
 		defer func() {
@@ -65,12 +65,14 @@ func (self *evQueue) protectedCall(callback func()) {
 	callback()
 }
 
+// 开启事件循环
 // 这个函数做的操作就是创建一个 goroutine，来充当队列的 worker
-func (self *evQueue) StartLoop() {
+func (self *eventQueue) StartLoop() EventQueue {
 
 	self.endSignal.Add(1)
 
 	go func() {
+
 		for callback := range self.queue {
 
 			if callback == nil {
@@ -82,29 +84,48 @@ func (self *evQueue) StartLoop() {
 
 		self.endSignal.Done()
 	}()
+
+	return self
 }
 
-func (self *evQueue) StopLoop(result int) {
+// 停止事件循环
+func (self *eventQueue) StopLoop() EventQueue {
 	self.queue <- nil
-	self.result = result
+	return self
 }
 
-func (self *evQueue) Wait() int {
+// 等待退出消息
+func (self *eventQueue) Wait() {
 	self.endSignal.Wait()
-	return self.result
 }
 
 const DefaultQueueSize = 100
 
+// 创建默认长度的队列
 func NewEventQueue() EventQueue {
 
-	return NewEventQueueByLen(DefaultQueueSize)
+	return &eventQueue{
+		queue: make(chan func(), DefaultQueueSize),
+	}
 }
 
-func NewEventQueueByLen(l int) EventQueue {
-	self := &evQueue{
-		queue: make(chan func(), l),
+// 在会话对应的Peer上的事件队列中执行callback，如果没有队列，则马上执行
+func SessionQueuedCall(ses Session, callback func()) {
+	if ses == nil {
+		return
 	}
+	q := ses.Peer().(interface {
+		Queue() EventQueue
+	}).Queue()
 
-	return self
+	QueuedCall(q, callback)
+}
+
+// 有队列时队列调用，无队列时直接调用
+func QueuedCall(queue EventQueue, callback func()) {
+	if queue == nil {
+		callback()
+	} else {
+		queue.Post(callback)
+	}
 }

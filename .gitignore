@@ -1,2 +1,6 @@
 *.exe
 .idea/
+debug.test
+codec/gogopb/test/protoc
+codec/gogopb/test/protoc-gen-gogofaster
+codec/gogopb/test/protoc-gen-msg
