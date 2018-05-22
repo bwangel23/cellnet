@@ -3,17 +3,18 @@
 <head>
 </head>
 <body>
+<p>在Chrome浏览器中按F12打开调试窗口，Console中查看结果</p>
 <script type="text/javascript">
     
     window.onload = function () {
 
         console.log("hello")
 
-        var ws = new WebSocket("ws://127.0.0.1:8801/echo");
+        var ws = new WebSocket("ws://127.0.0.1:18802/echo");
 
         ws.onopen = function(evt) {
             console.log("Connection open ...");
-            ws.send('gamedef.TestEchoJsonACK\n{"Content":"hello world" }');
+            ws.send('main.TestEchoACK\n{"Msg":"hello world" }');
         };
 
         ws.onmessage = function(evt) {

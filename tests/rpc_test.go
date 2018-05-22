@@ -2,145 +2,138 @@ package tests
 
 import (
 	"github.com/davyxu/cellnet"
-	_ "github.com/davyxu/cellnet/codec/pb" // 启用pb编码
-	"github.com/davyxu/cellnet/proto/pb/gamedef"
+	"github.com/davyxu/cellnet/peer"
+	"github.com/davyxu/cellnet/proc"
 	"github.com/davyxu/cellnet/rpc"
-	"github.com/davyxu/cellnet/socket"
 	"github.com/davyxu/cellnet/util"
 	"testing"
 	"time"
 )
 
-var asyncSignal *util.SignalTester
-var syncSignal *util.SignalTester
+const syncRPC_Address = "127.0.0.1:9201"
 
-var rpcAcceptor cellnet.Peer
+var (
+	syncRPC_Signal  *util.SignalTester
+	asyncRPC_Signal *util.SignalTester
 
-func server() {
+	rpc_Acceptor cellnet.Peer
+)
 
+func rpc_StartServer() {
 	queue := cellnet.NewEventQueue()
 
-	rpcAcceptor = socket.NewAcceptor(queue)
-	rpcAcceptor.SetName("server")
-	rpcAcceptor.Start("127.0.0.1:9201")
+	rpc_Acceptor = peer.NewGenericPeer("tcp.Acceptor", "server", syncRPC_Address, queue)
 
-	rpc.RegisterMessage(rpcAcceptor, "gamedef.TestEchoACK", func(ev *cellnet.Event) {
-		msg := ev.Msg.(*gamedef.TestEchoACK)
+	proc.BindProcessorHandler(rpc_Acceptor, "tcp.ltv", func(ev cellnet.Event) {
+		switch msg := ev.Message().(type) {
+		case *TestEchoACK:
+			log.Debugln("server recv rpc ", *msg)
 
-		log.Debugln("server recv:", msg.String())
+			ev.(interface {
+				Reply(interface{})
+			}).Reply(&TestEchoACK{
+				Msg:   msg.Msg,
+				Value: msg.Value,
+			})
 
-		ev.Send(&gamedef.TestEchoACK{
-			Content: msg.String(),
-		})
+		}
 
 	})
+	rpc_Acceptor.Start()
 
 	queue.StartLoop()
+}
+func syncRPC_OnClientEvent(ev cellnet.Event) {
 
+	switch ev.Message().(type) {
+	case *cellnet.SessionConnected:
+		for i := 0; i < 2; i++ {
+
+			// 同步阻塞请求必须并发启动，否则客户端无法接收数据
+			go func(id int) {
+
+				result, err := rpc.CallSync(ev.Session(), &TestEchoACK{
+					Msg:   "sync",
+					Value: 1234,
+				}, time.Second*5)
+
+				if err != nil {
+					syncRPC_Signal.Log(err)
+					syncRPC_Signal.FailNow()
+					return
+				}
+
+				msg := result.(*TestEchoACK)
+				log.Debugln("client sync recv:", msg.Msg, id*100)
+
+				syncRPC_Signal.Done(id * 100)
+
+			}(i + 1)
+		}
+	}
 }
 
-// 异步阻塞调用的rpc: 适用于逻辑服与逻辑服之间互相查询数据
-func asyncClient() {
+func asyncRPC_OnClientEvent(ev cellnet.Event) {
 
-	queue := cellnet.NewEventQueue()
-
-	p := socket.NewConnector(queue)
-	p.SetName("client.async")
-	p.Start("127.0.0.1:9201")
-
-	cellnet.RegisterMessage(p, "coredef.SessionConnected", func(ev *cellnet.Event) {
-
+	switch ev.Message().(type) {
+	case *cellnet.SessionConnected:
 		for i := 0; i < 2; i++ {
 
 			copy := i + 1
 
-			err := rpc.Call(p, &gamedef.TestEchoACK{
-				Content: "async",
-			}, "gamedef.TestEchoACK", time.Second, func(rpcev *cellnet.Event) {
-				msg := rpcev.Msg.(*gamedef.TestEchoACK)
+			rpc.Call(ev.Session(), &TestEchoACK{
+				Msg:   "async",
+				Value: 1234,
+			}, time.Second*5, func(feedback interface{}) {
 
-				log.Debugln(copy, "client async recv:", msg.Content)
+				switch v := feedback.(type) {
+				case error:
+					asyncRPC_Signal.Log(v)
+					asyncRPC_Signal.FailNow()
+				case *TestEchoACK:
+					log.Debugln("client sync recv:", v.Msg)
+					asyncRPC_Signal.Done(copy)
+				}
 
-				asyncSignal.Done(copy)
 			})
 
-			if err != nil {
-				asyncSignal.T.Log(err)
-				asyncSignal.T.FailNow()
-			}
-
 		}
-
-	})
-
-	queue.StartLoop()
-
-	asyncSignal.WaitAndExpect("async not recv data ", 1, 2)
+	}
 }
 
-// 同步阻塞调用的rpc: 适用于web后台向逻辑服查询数据后生成页面
-func syncClient() {
+func rpc_StartClient(eventFunc func(event cellnet.Event)) {
 
 	queue := cellnet.NewEventQueue()
 
-	p := socket.NewConnector(queue)
-	p.SetName("client.sync")
-	p.Start("127.0.0.1:9201")
+	p := peer.NewGenericPeer("tcp.Connector", "client", syncRPC_Address, queue)
 
-	cellnet.RegisterMessage(p, "coredef.SessionConnected", func(ev *cellnet.Event) {
+	proc.BindProcessorHandler(p, "tcp.ltv", eventFunc)
 
-		for i := 0; i < 2; i++ {
-
-			// 这里使用goroutine包裹调用原因: 避免当前消息不返回, 无法继续处理rpc的消息接收
-			// 正式使用时, CallSync被调用的消息所在的Peer, 与CallSync第一个参数使用Peer一定是不同Peer
-			go func(id int) {
-
-				result, err := rpc.CallSync(p, &gamedef.TestEchoACK{
-					Content: "sync",
-				}, "gamedef.TestEchoACK", 5*time.Second)
-
-				if err != nil {
-					syncSignal.Log(err)
-					syncSignal.FailNow()
-					return
-				}
-
-				msg := result.(*gamedef.TestEchoACK)
-				log.Debugln("client sync recv:", msg.Content, id*100)
-
-				syncSignal.Done(id * 100)
-
-			}(i + 1)
-
-		}
-
-	})
+	p.Start()
 
 	queue.StartLoop()
-
-	syncSignal.WaitAndExpect("sync not recv data ", 100, 200)
-
-}
-
-func TestAsyncRPC(t *testing.T) {
-
-	asyncSignal = util.NewSignalTester(t)
-
-	server()
-
-	asyncClient()
-
-	rpcAcceptor.Stop()
-
 }
 
 func TestSyncRPC(t *testing.T) {
 
-	syncSignal = util.NewSignalTester(t)
+	syncRPC_Signal = util.NewSignalTester(t)
 
-	server()
+	rpc_StartServer()
 
-	syncClient()
+	rpc_StartClient(syncRPC_OnClientEvent)
+	syncRPC_Signal.WaitAndExpect("sync not recv data ", 100, 200)
 
-	rpcAcceptor.Stop()
+	rpc_Acceptor.Stop()
+}
+
+func TestASyncRPC(t *testing.T) {
+
+	asyncRPC_Signal = util.NewSignalTester(t)
+
+	rpc_StartServer()
+
+	rpc_StartClient(asyncRPC_OnClientEvent)
+	asyncRPC_Signal.WaitAndExpect("async not recv data ", 1, 2)
+
+	rpc_Acceptor.Stop()
 }
